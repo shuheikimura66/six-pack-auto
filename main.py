@@ -18,7 +18,7 @@ json_creds = json.loads(os.environ["GCP_JSON"])
 
 # ★ここだけ書き換えてください★
 SPREADSHEET_KEY = 'https://docs.google.com/spreadsheets/d/1H2TiCraNjMNoj3547ZB78nQqrdfbfk2a0rMLSbZBE48/edit?gid=113667273#gid=113667273' 
-SHEET_NAME = '当日_raw'
+SHEET_NAME = 'シート1'
 TARGET_URL = "https://asp1.six-pack.xyz/admin/report/ad/list"
 
 def main():

@@ -1,10 +1,13 @@
 import os
 import json
 import time
+import glob
 import pandas as pd
 import gspread
 from urllib.parse import quote
 from oauth2client.service_account import ServiceAccountCredentials
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
@@ -17,25 +20,45 @@ PASSWORD = os.environ["USER_PASS"]
 json_creds = json.loads(os.environ["GCP_JSON"])
 
 # --- 設定 ---
-# ★修正: URLでもIDでも動くように open_by_url を使うようコード側を変えました
-SPREADSHEET_URL = 'https://docs.google.com/spreadsheets/d/1H2TiCraNjMNoj3547ZB78nQqrdfbfk2a0rMLSbZBE48/edit?gid=1577246928#gid=1577246928'
+# 転記先のスプレッドシート
+SPREADSHEET_URL = 'https://docs.google.com/spreadsheets/d/1H2TiCraNjMNoj3547ZB78nQqrdfbfk2a0rMLSbZBE48/edit'
 SHEET_NAME = 'シート1'
+
+# CSVを保存したいGoogleドライブのフォルダID
+# URLが https://drive.google.com/drive/u/0/folders/1HaLB... の場合、末尾の記号部分です
+DRIVE_FOLDER_ID = '1HaLB15qHhdf4r2oSGzyiqN_0Cswmnf3O'
+
+# 対象サイト
 TARGET_URL = "https://asp1.six-pack.xyz/admin/report/ad/list"
 
 def main():
     print("=== 処理開始 ===")
     
-    # Chrome設定
+    # ダウンロード先のフォルダ設定（現在の場所/downloads）
+    download_dir = os.path.join(os.getcwd(), "downloads")
+    if not os.path.exists(download_dir):
+        os.makedirs(download_dir)
+
+    # Chrome設定（ダウンロード許可設定を追加）
     options = Options()
     options.add_argument('--headless')
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
-    options.add_argument('--window-size=1920,1080') # 画面サイズを確保
+    options.add_argument('--window-size=1920,1080')
+    
+    # ヘッドレスモードでのダウンロードを有効にする設定
+    prefs = {
+        "download.default_directory": download_dir,
+        "download.prompt_for_download": False,
+        "download.directory_upgrade": True,
+        "safebrowsing.enabled": True
+    }
+    options.add_experimental_option("prefs", prefs)
     
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
 
     try:
-        # --- 1. Basic認証URLの作成 ---
+        # --- 1. Basic認証URLでアクセス ---
         safe_user = quote(USER_ID, safe='')
         safe_pass = quote(PASSWORD, safe='')
         url_body = TARGET_URL.replace("https://", "").replace("http://", "")
@@ -43,54 +66,79 @@ def main():
         
         print(f"アクセス中: {TARGET_URL}")
         driver.get(auth_url)
-        time.sleep(5)
-        
-        # --- 2. ログイン成功確認 (ログ用) ---
-        print(f"現在のページタイトル: {driver.title}")
-        print(f"現在のURL: {driver.current_url}")
+        time.sleep(5) # ページ読み込み待機
 
-        if "401" in driver.title or "Unauthorized" in driver.page_source:
-            print("【失敗】認証に失敗しました。ID/PASSが間違っているか、サイトがこの方式をブロックしています。")
+        # --- 2. 「CSV生成」ボタンを探してクリック ---
+        try:
+            # "CSV生成" という文字を含む要素を探す（ボタンやリンク）
+            print("「CSV生成」ボタンを探しています...")
+            csv_btn = driver.find_element(By.XPATH, "//*[contains(text(), 'CSV生成')]")
+            csv_btn.click()
+            print("ボタンをクリックしました。ダウンロード待機中...")
+            
+            # ダウンロード完了待ち（最大30秒）
+            time.sleep(5) 
+            for i in range(10):
+                files = glob.glob(os.path.join(download_dir, "*.csv"))
+                if files:
+                    break
+                time.sleep(3)
+                
+            files = glob.glob(os.path.join(download_dir, "*.csv"))
+            if not files:
+                print("【エラー】CSVファイルがダウンロードされませんでした。")
+                return
+            
+            csv_file_path = files[0] # 見つかった最新のファイル
+            print(f"ダウンロード完了: {csv_file_path}")
+
+        except Exception as e:
+            print(f"ボタンクリックまたはダウンロード中にエラー: {e}")
             return
 
-        # --- 3. データ取得 ---
-        # まずは「きれいな表」があるか探す
-        dfs = pd.read_html(driver.page_source)
-        data_to_upload = []
+        # --- 3. Googleドライブへのアップロード ---
+        print("Googleドライブへアップロード中...")
+        scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(json_creds, scope)
+        
+        drive_service = build('drive', 'v3', credentials=creds)
+        
+        file_metadata = {
+            'name': os.path.basename(csv_file_path),
+            'parents': [DRIVE_FOLDER_ID]
+        }
+        media = MediaFileUpload(csv_file_path, mimetype='text/csv')
+        drive_file = drive_service.files().create(body=file_metadata, media_body=media, fields='id').execute()
+        print(f"ドライブへの保存完了 (File ID: {drive_file.get('id')})")
 
-        if len(dfs) > 0:
-            print(f"テーブルタグを {len(dfs)} 件発見。きれいな表として取得します。")
-            df = dfs[0].fillna("")
-            data_to_upload = [df.columns.values.tolist()] + df.values.tolist()
-        else:
-            print("テーブルタグが見つかりません。「Ctrl+A」モードでテキスト全文を取得します。")
-            # bodyタグの中身をテキストとして全部取得
-            body_text = driver.find_element(By.TAG_NAME, "body").text
-            # 改行で区切ってリストにする（A列に縦に並べるイメージ）
-            rows = body_text.split('\n')
-            data_to_upload = [[row] for row in rows]
-            
-            if not data_to_upload:
-                print("【警告】画面上にテキストが何も見つかりませんでした。")
+        # --- 4. CSV読み込みとスプレッドシート更新 ---
+        print("CSVデータを読み込んでいます...")
+        
+        # 文字コード判定（日本語CSVはShift-JISが多いが、UTF-8の場合もあるためトライする）
+        try:
+            df = pd.read_csv(csv_file_path, encoding='cp932') # Shift-JIS
+        except:
+            try:
+                df = pd.read_csv(csv_file_path, encoding='utf-8')
+            except:
+                df = pd.read_csv(csv_file_path, encoding='utf-16')
 
-        # --- 4. スプレッドシートへ書き込み ---
-        if data_to_upload:
-            scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-            creds = ServiceAccountCredentials.from_json_keyfile_dict(json_creds, scope)
-            client = gspread.authorize(creds)
-            
-            # URLから直接開く方式に変更（これで変なエラーが消えます）
-            sheet = client.open_by_url(SPREADSHEET_URL).worksheet(SHEET_NAME)
-            
-            sheet.clear()
-            sheet.update(data_to_upload)
-            print("=== 更新完了！スプレッドシートを確認してください ===")
-        else:
-            print("=== データが空のため、更新をスキップしました ===")
+        # NaN（空データ）を空文字に変換
+        df = df.fillna("")
+        
+        # データ整形
+        data_to_upload = [df.columns.values.tolist()] + df.values.tolist()
+
+        # スプレッドシート書き込み
+        client = gspread.authorize(creds)
+        sheet = client.open_by_url(SPREADSHEET_URL).worksheet(SHEET_NAME)
+        
+        sheet.clear()
+        sheet.update(data_to_upload)
+        print("=== 更新完了！スプレッドシートを確認してください ===")
 
     except Exception as e:
         print(f"【エラー発生】: {e}")
-        # 詳細なエラー情報を出す
         import traceback
         traceback.print_exc()
     finally:

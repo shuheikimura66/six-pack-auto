@@ -20,7 +20,7 @@ json_creds = json.loads(os.environ["GCP_JSON"])
 # --- 設定 ---
 # 転記先のスプレッドシート
 SPREADSHEET_URL = 'https://docs.google.com/spreadsheets/d/1H2TiCraNjMNoj3547ZB78nQqrdfbfk2a0rMLSbZBE48/edit'
-SHEET_NAME = 'シート1'
+SHEET_NAME = '当日_raw'
 TARGET_URL = "https://asp1.six-pack.xyz/admin/report/ad/list"
 
 def main():

@@ -3,7 +3,7 @@ import json
 import time
 import pandas as pd
 import gspread
-from urllib.parse import quote  # ★追加：記号などをURL用に変換する機能
+from urllib.parse import quote
 from oauth2client.service_account import ServiceAccountCredentials
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -11,69 +11,88 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
 from webdriver_manager.chrome import ChromeDriverManager
 
-# 環境変数から情報を取得
+# --- 環境変数 ---
 USER_ID = os.environ["USER_ID"]
 PASSWORD = os.environ["USER_PASS"]
-# JSONキーを復元
 json_creds = json.loads(os.environ["GCP_JSON"])
 
-# 設定
-SPREADSHEET_KEY = 'https://docs.google.com/spreadsheets/d/1H2TiCraNjMNoj3547ZB78nQqrdfbfk2a0rMLSbZBE48/edit?gid=1577246928#gid=1577246928' # ★ここだけあなたのIDのままで！
+# --- 設定 ---
+# ★修正: URLでもIDでも動くように open_by_url を使うようコード側を変えました
+SPREADSHEET_URL = 'https://docs.google.com/spreadsheets/d/1H2TiCraNjMNoj3547ZB78nQqrdfbfk2a0rMLSbZBE48/edit?gid=1577246928#gid=1577246928'
 SHEET_NAME = 'シート1'
 TARGET_URL = "https://asp1.six-pack.xyz/admin/report/ad/list"
 
 def main():
-    print("処理開始")
+    print("=== 処理開始 ===")
     
-    # Chromeの設定
+    # Chrome設定
     options = Options()
     options.add_argument('--headless')
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
+    options.add_argument('--window-size=1920,1080') # 画面サイズを確保
     
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
 
     try:
-        # --- ★Basic認証用のURL作成とアクセス（ここが変わりました） ---
-        
-        # IDやパスワードに「@」などの記号が入っているとURLが壊れるので変換処理をします
+        # --- 1. Basic認証URLの作成 ---
         safe_user = quote(USER_ID, safe='')
         safe_pass = quote(PASSWORD, safe='')
-        
-        # "https://" を取り除いたURLの本体を取得
         url_body = TARGET_URL.replace("https://", "").replace("http://", "")
-        
-        # 認証情報付きのURLを作成: https://ID:PASS@URL... の形式にします
         auth_url = f"https://{safe_user}:{safe_pass}@{url_body}"
         
-        print("認証付きURLでアクセスします...")
+        print(f"アクセス中: {TARGET_URL}")
         driver.get(auth_url)
-        
-        # 読み込み待機（Basic認証はアクセスした瞬間にログイン完了しています）
         time.sleep(5)
         
-        # --- データ取得処理 ---
-        # 画面のHTMLを取得してテーブルを探す
+        # --- 2. ログイン成功確認 (ログ用) ---
+        print(f"現在のページタイトル: {driver.title}")
+        print(f"現在のURL: {driver.current_url}")
+
+        if "401" in driver.title or "Unauthorized" in driver.page_source:
+            print("【失敗】認証に失敗しました。ID/PASSが間違っているか、サイトがこの方式をブロックしています。")
+            return
+
+        # --- 3. データ取得 ---
+        # まずは「きれいな表」があるか探す
         dfs = pd.read_html(driver.page_source)
-        
+        data_to_upload = []
+
         if len(dfs) > 0:
-            print(f"{len(dfs)}個の表が見つかりました。最初の表を保存します。")
+            print(f"テーブルタグを {len(dfs)} 件発見。きれいな表として取得します。")
             df = dfs[0].fillna("")
+            data_to_upload = [df.columns.values.tolist()] + df.values.tolist()
+        else:
+            print("テーブルタグが見つかりません。「Ctrl+A」モードでテキスト全文を取得します。")
+            # bodyタグの中身をテキストとして全部取得
+            body_text = driver.find_element(By.TAG_NAME, "body").text
+            # 改行で区切ってリストにする（A列に縦に並べるイメージ）
+            rows = body_text.split('\n')
+            data_to_upload = [[row] for row in rows]
             
-            # スプレッドシート接続
+            if not data_to_upload:
+                print("【警告】画面上にテキストが何も見つかりませんでした。")
+
+        # --- 4. スプレッドシートへ書き込み ---
+        if data_to_upload:
             scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
             creds = ServiceAccountCredentials.from_json_keyfile_dict(json_creds, scope)
             client = gspread.authorize(creds)
             
-            sheet = client.open_by_key(SPREADSHEET_KEY).worksheet(SHEET_NAME)
+            # URLから直接開く方式に変更（これで変なエラーが消えます）
+            sheet = client.open_by_url(SPREADSHEET_URL).worksheet(SHEET_NAME)
+            
             sheet.clear()
-            sheet.update([df.columns.values.tolist()] + df.values.tolist())
-            print("更新完了！スプレッドシートを確認してください。")
+            sheet.update(data_to_upload)
+            print("=== 更新完了！スプレッドシートを確認してください ===")
         else:
-            print("エラー: 画面内にテーブル(表)が見つかりませんでした。ログインは成功している可能性がありますが、ページの構造が予想と違うかもしれません。")
+            print("=== データが空のため、更新をスキップしました ===")
 
     except Exception as e:
-        print(f"エラーが発生しました: {e}")
+        print(f"【エラー発生】: {e}")
+        # 詳細なエラー情報を出す
+        import traceback
+        traceback.print_exc()
     finally:
         driver.quit()
 

@@ -119,9 +119,9 @@ def main():
         JST = timezone(timedelta(hours=+9), 'JST')
         now = datetime.now(JST)
         
-        # 指定の形式を作成: 更新日：mm/dd：hh/mm
-        # (例: 更新日：12/24：15/30)
-        timestamp_str = now.strftime("更新日：%m/%d：%H/%M")
+        # 指定の形式を作成: 更新日：mm/dd_hh:mm
+        # (例: 更新日：12/24_15:30)
+        timestamp_str = now.strftime("更新日：%m/%d_%H:%M")
         
         try:
             sheet_date = spreadsheet.worksheet(DATE_SHEET_NAME)

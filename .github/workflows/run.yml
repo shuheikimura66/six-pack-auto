@@ -1,0 +1,29 @@
+name: Scrape and Update Sheet
+
+on:
+  schedule:
+    # 30分おきに実行 (UTC時間基準)
+    - cron: '*/30 * * * *'
+  workflow_dispatch: # 手動実行ボタンも有効にする
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+          
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          
+      - name: Run script
+        env:
+          USER_ID: ${{ secrets.USER_ID }}
+          USER_PASS: ${{ secrets.USER_PASS }}
+          GCP_JSON: ${{ secrets.GCP_JSON }}
+        run: python main.py

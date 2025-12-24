@@ -5,3 +5,4 @@ gspread
 oauth2client
 lxml
 openpyxl
+google-api-python-client

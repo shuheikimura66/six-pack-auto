@@ -2,9 +2,8 @@ name: Scrape and Update Sheet
 
 on:
   schedule:
-    # 日本時間 05:00 ~ 21:30 の間、30分おきに実行
-    # UTC（世界標準時）では 20:00~23:30 と 0:00~12:30 に相当
-    - cron: '*/30 0-12,20-23 * * *'
+    # 24時間、10分おきに実行
+    - cron: '*/10 * * * *'
   workflow_dispatch: # 手動実行ボタンも有効にする
 
 jobs:

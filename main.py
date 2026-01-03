@@ -19,10 +19,11 @@ PASSWORD = os.environ["USER_PASS"]
 json_creds = json.loads(os.environ["GCP_JSON"])
 
 # --- 設定 ---
-SPREADSHEET_URL = 'https://docs.google.com/spreadsheets/d/1H2TiCraNjMNoj3547ZB78nQqrdfbfk2a0rMLSbZBE48/edit'
+# URLを環境変数から取得するように変更
+SPREADSHEET_URL = os.environ["SPREADSHEET_URL"]
 SHEET_NAME = '当日_raw'
-DATE_SHEET_NAME = '更新日' # ← 【追加】更新日を書き込むシート名
-TARGET_URL = "https://asp1.six-pack.xyz/admin/report/ad/list"
+DATE_SHEET_NAME = '更新日' 
+TARGET_URL = os.environ["TARGET_URL"]
 
 def main():
     print("=== 処理開始 ===")

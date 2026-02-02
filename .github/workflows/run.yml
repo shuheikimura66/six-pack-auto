@@ -6,6 +6,11 @@ on:
     - cron: '*/10 * * * *'
   workflow_dispatch: # 手動実行ボタンも有効にする
 
+# ▼ 追加: 同じワークフローが実行中の場合、古いものをキャンセルまたは待機させる設定
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
